@@ -72,7 +72,7 @@ static bool check_and_save_bump(KobukiSensors_t* sensors, bool* obstacle_is_righ
 // Save information about which cliff
 static bool check_cliff(KobukiSensors_t* sensors, bool* cliff_is_right) {
   // Your code here
-  *cliff_is_right = (sensors->cliffRight || sensors->cliffCenter)? true : false;
+  *cliff_is_right = (sensors->cliffRight || sensors->cliffCenter ) && ! sensors->cliffLeft ? true : false;
   return (sensors->cliffCenter || sensors->cliffLeft || sensors->cliffRight);
 }
 
@@ -114,10 +114,10 @@ robot_state_t controller(robot_state_t state) {
         printf("Orient Up\n");
         if(is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (driveUp && (tilt <= -4)){
+        } else if (driveUp && (tilt <= -5)){
           state = DRIVING;
-          leftSpeed = 70;
-          rightSpeed = 70;
+          leftSpeed = 120;
+          rightSpeed = 120;
         } else {
           kobukiDriveDirect(leftSpeed, rightSpeed);
         }
@@ -127,7 +127,7 @@ robot_state_t controller(robot_state_t state) {
         printf("Driving\n");
         if (is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (fabs(tilt) > 2 && check_cliff(&sensors, &cliff_is_right)) { 
+        } else if (fabs(tilt) > 1 && check_cliff(&sensors, &cliff_is_right)) { 
           distance = 0;
           leftSpeed = 0;
           rightSpeed = 0;
@@ -135,8 +135,8 @@ robot_state_t controller(robot_state_t state) {
           state = AVOID;
         } else if (driveUp && fabs(tilt) < 1) {
           distance = 0;
-          leftSpeed = 80;
-          rightSpeed = 80;
+          leftSpeed = 90;
+          rightSpeed = 90;
           previous_encoder = sensors.leftWheelEncoder;
           state = TRANSIENT;
         }
@@ -157,7 +157,7 @@ robot_state_t controller(robot_state_t state) {
           rightSpeed = 0;
           previous_encoder = sensors.leftWheelEncoder;
           state = AVOID;
-        } else if (distance > 0.5) {
+        } else if (distance > 0.3) {
           lsm9ds1_start_gyro_integration();
           angle = 0;
           leftSpeed = 80;
@@ -176,10 +176,10 @@ robot_state_t controller(robot_state_t state) {
         printf("Orient Down\n");
         if(is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (fabs(angle) > 135) {
+        } else if (fabs(angle) > 160) {
           state = DRIVING;
-          leftSpeed = 80;
-          rightSpeed = 80;
+          leftSpeed = 130;
+          rightSpeed = 130;
         } else {
           driveUp = false;
           kobukiDriveDirect(leftSpeed, rightSpeed);
@@ -209,12 +209,12 @@ robot_state_t controller(robot_state_t state) {
         if (is_button_pressed(&sensors)) {
           state = OFF;
           lsm9ds1_stop_gyro_integration();
-        } else if (fabs(angle) >= 25) {          
+        } else if (fabs(angle) >= 15) {          
           distance = 0;
           angle = 0;
           
-          leftSpeed = 80;
-          rightSpeed = 80;
+          leftSpeed = 90;
+          rightSpeed = 90;
           state = DRIVING;
           lsm9ds1_stop_gyro_integration();
         }
@@ -247,4 +247,3 @@ robot_state_t controller(robot_state_t state) {
     }
     return state;
 }
-
