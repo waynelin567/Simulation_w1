@@ -92,7 +92,7 @@ static float read_tilt() {
 robot_state_t controller(robot_state_t state) {
 
   kobukiSensorPoll(&sensors);
-
+  tilt = read_tilt();
     // handle states
     switch(state) {
       case OFF: {
@@ -119,7 +119,6 @@ robot_state_t controller(robot_state_t state) {
           leftSpeed = 70;
           rightSpeed = 70;
         } else {
-          tilt = read_tilt();
           kobukiDriveDirect(leftSpeed, rightSpeed);
         }
         break;
@@ -128,13 +127,37 @@ robot_state_t controller(robot_state_t state) {
         printf("Driving\n");
         if (is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (check_cliff(&sensors, &cliff_is_right)) { 
-          state = AVOID;
+        } else if (fabs(tilt) > 2 && check_cliff(&sensors, &cliff_is_right)) { 
           distance = 0;
           leftSpeed = 0;
           rightSpeed = 0;
           previous_encoder = sensors.leftWheelEncoder;
-        } else if (driveUp && tilt > 1) {
+          state = AVOID;
+        } else if (driveUp && fabs(tilt) < 1) {
+          distance = 0;
+          leftSpeed = 80;
+          rightSpeed = 80;
+          previous_encoder = sensors.leftWheelEncoder;
+          state = TRANSIENT;
+        }
+        else {
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+          
+          state = DRIVING;
+        }
+        break; // each case needs to end with break!
+      }
+      case TRANSIENT: {
+        printf("Transient\n");
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if (check_cliff(&sensors, &cliff_is_right)) { 
+          distance = 0;
+          leftSpeed = 0;
+          rightSpeed = 0;
+          previous_encoder = sensors.leftWheelEncoder;
+          state = AVOID;
+        } else if (distance > 0.5) {
           lsm9ds1_start_gyro_integration();
           angle = 0;
           leftSpeed = 80;
@@ -143,10 +166,11 @@ robot_state_t controller(robot_state_t state) {
         }
         else {
           kobukiDriveDirect(leftSpeed, rightSpeed);
-          tilt = read_tilt();
-          state = DRIVING;
+          distance = measure_distance(sensors.leftWheelEncoder, previous_encoder, true);
+          state = TRANSIENT;
         }
         break; // each case needs to end with break!
+        break;
       }
       case ORIENT_DOWN: {
         printf("Orient Down\n");
@@ -185,7 +209,7 @@ robot_state_t controller(robot_state_t state) {
         if (is_button_pressed(&sensors)) {
           state = OFF;
           lsm9ds1_stop_gyro_integration();
-        } else if (fabs(angle) >= 45) {          
+        } else if (fabs(angle) >= 25) {          
           distance = 0;
           angle = 0;
           
@@ -223,3 +247,4 @@ robot_state_t controller(robot_state_t state) {
     }
     return state;
 }
+

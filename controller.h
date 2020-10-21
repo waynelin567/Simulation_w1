@@ -7,6 +7,7 @@ typedef enum {
   DRIVING,
   ORIENT_UP,
   ORIENT_DOWN,
+  TRANSIENT,
   TURN,
   AVOID,
   BACK,
