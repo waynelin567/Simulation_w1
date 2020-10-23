@@ -21,7 +21,7 @@ float angle = 0;
 float tilt = 0;
 bool driveUp = true;;
 bool cliff_is_right = false;
-
+float mintilt = 20;
 uint16_t previous_encoder;// = sensors.leftWheelEncoder;
 int16_t leftSpeed, rightSpeed;
 
@@ -99,10 +99,12 @@ robot_state_t controller(robot_state_t state) {
         printf("OFF\n");
         // transition logic
         if (is_button_pressed(&sensors)) {
-          state = ORIENT_UP;
+          state = FINDTILT;
           driveUp = true;
           leftSpeed = 70;
           rightSpeed = -70;
+          angle = 0;
+          lsm9ds1_start_gyro_integration();
         } else {    
           state = OFF;
           kobukiDriveDirect(0, 0);
@@ -110,14 +112,41 @@ robot_state_t controller(robot_state_t state) {
         
         break; // each case needs to end with break!
       }
+      case FINDTILT: {
+        printf("FINDTILT\n");
+        // transition logic
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+          lsm9ds1_stop_gyro_integration();
+          angle = 0;
+        } 
+        else if (fabs(angle) >= 340)
+        {
+          lsm9ds1_stop_gyro_integration();
+          angle = 0;
+          state = ORIENT_UP;
+          printf("angle, %f\n", angle);
+        }
+        else  
+        {
+            kobukiDriveDirect(leftSpeed, rightSpeed);
+            angle = lsm9ds1_read_gyro_integration().z_axis;
+
+            if (mintilt > tilt) mintilt = tilt;
+        }
+        
+        
+        break; // each case needs to end with break!
+      }
+
       case ORIENT_UP: {
-        printf("Orient Up\n");
+        printf("Orient Up %f\n", mintilt);
         if(is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (driveUp && (tilt <= -5)){
+        } else if (driveUp && (tilt <= (mintilt+0.5))){
           state = DRIVING;
-          leftSpeed = 120;
-          rightSpeed = 120;
+          leftSpeed = 115;
+          rightSpeed = 115;
         } else {
           kobukiDriveDirect(leftSpeed, rightSpeed);
         }
@@ -176,10 +205,11 @@ robot_state_t controller(robot_state_t state) {
         printf("Orient Down\n");
         if(is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (fabs(angle) > 160) {
+        } else if (fabs(angle) > 165) {
           state = DRIVING;
           leftSpeed = 130;
           rightSpeed = 130;
+          lsm9ds1_stop_gyro_integration();
         } else {
           driveUp = false;
           kobukiDriveDirect(leftSpeed, rightSpeed);

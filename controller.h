@@ -4,6 +4,7 @@
 // Add your own states here
 typedef enum {
   OFF,
+  FINDTILT,
   DRIVING,
   ORIENT_UP,
   TRANSIENT,
