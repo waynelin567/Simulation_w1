@@ -1,0 +1,325 @@
+#include "controller.h"
+#include <math.h>
+#include <stdio.h>
+
+#define SIMULATION false 
+#define PI 3.14159265
+
+#if SIMULATION
+#include "simulatorFunctions.h"
+#else
+#include "kobukiSensorTypes.h"
+#include "display.h"
+#include "lsm9ds1.h"
+#endif
+
+// Configure initial state
+KobukiSensors_t sensors = {0};
+
+// You may need to add additional variables to keep track of state here
+float distance = 0;
+float angle = 0;
+float tilt = 0;
+bool driveUp = true;;
+bool cliff_is_right = false;
+float mintilt = 20;
+uint16_t previous_encoder;// = sensors.leftWheelEncoder;
+int16_t leftSpeed, rightSpeed;
+const int aSize = 10;
+float array[10];
+int curSize = 0;
+// Return distance traveled between two encoder values
+static float measure_distance(uint16_t current_encoder, uint16_t previous_encoder, bool dir) {
+  const float CONVERSION = 0.0006108;
+  if(dir)
+  {
+    if(current_encoder >= previous_encoder)
+    {
+     return (current_encoder - previous_encoder) * CONVERSION;
+    }
+    else{
+      // overflow occur;
+      return ((0xFFFF - previous_encoder) + current_encoder) * CONVERSION;
+    }
+  } else {
+    if(current_encoder <= previous_encoder)
+    {
+     return (previous_encoder - current_encoder) * CONVERSION;
+    }
+    else{
+      // overflow occur;
+      return (previous_encoder + 0xFFFF -  current_encoder) * CONVERSION;
+    }
+  }
+  return 0;
+  // Your code here
+}
+
+static bool obstacle_detected(KobukiSensors_t sensors)
+{
+  return sensors.bumps_wheelDrops.bumpLeft || sensors.bumps_wheelDrops.bumpCenter  || sensors.bumps_wheelDrops.bumpRight;
+}
+
+static int get_bump_angle(KobukiSensors_t sensors)
+{
+  return (sensors.bumps_wheelDrops.bumpLeft? -25:25);
+}
+
+// Return true if a cliff has been seen
+// Save information about which cliff
+static bool check_and_save_bump(KobukiSensors_t* sensors, bool* obstacle_is_right) {
+  // Your code here
+  return true;
+}
+
+// Return true if a cliff has been seen
+// Save information about which cliff
+static bool check_cliff(KobukiSensors_t* sensors, bool* cliff_is_right) {
+  // Your code here
+  *cliff_is_right = (sensors->cliffRight || sensors->cliffCenter ) && ! sensors->cliffLeft ? true : false;
+  return (sensors->cliffCenter || sensors->cliffLeft || sensors->cliffRight);
+}
+
+// Read accelerometer value and calculate and return tilt (along axis corresponding to climbing the hill)
+static float read_tilt() {
+  // Your code here
+  lsm9ds1_measurement_t accVal = lsm9ds1_read_accelerometer();
+  float degree = atan(accVal.y_axis / sqrt(accVal.x_axis * accVal.x_axis + accVal.z_axis * accVal.z_axis)) * 180 / PI; 
+  //if (degree < -30) degree = -30;
+  if (curSize < aSize) 
+  {
+    array[curSize] = degree;
+    curSize ++;
+  }
+  else 
+  {
+    for (int i = 0; i < aSize -1; i++)
+    {
+      array[i] = array[i+1];
+    }
+    array[aSize-1] = degree;
+  }
+  for (int i = 0; i < curSize; i++)
+    degree += array[i];
+  degree /= curSize;
+  char buf[16];
+  snprintf(buf, 16, "%f\n", degree);
+  display_write(buf, DISPLAY_LINE_1);
+  return degree;
+}
+
+// Robot controller
+// State machine running on robot_state_t state
+// This is called in a while loop
+robot_state_t controller(robot_state_t state) {
+
+  kobukiSensorPoll(&sensors);
+  tilt = read_tilt();
+    // handle states
+    switch(state) {
+      case OFF: {
+        char buf[16];
+        snprintf(buf, 16, "OFF");
+        display_write(buf, DISPLAY_LINE_0);
+        // transition logic
+        if (is_button_pressed(&sensors)) {
+          state = FINDTILT;
+          driveUp = true;
+          leftSpeed = 80;
+          rightSpeed = -80;
+          angle = 0;
+          lsm9ds1_start_gyro_integration();
+        } else {    
+          state = OFF;
+          kobukiDriveDirect(0, 0);
+        }
+        
+        break; // each case needs to end with break!
+      }
+      case FINDTILT: {
+        char buf[16];
+        snprintf(buf, 16, "FINDTILT");
+        display_write(buf, DISPLAY_LINE_0);
+        // transition logic
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+          lsm9ds1_stop_gyro_integration();
+          angle = 0;
+        } 
+        else if (fabs(angle) >= 358)
+        {
+          lsm9ds1_stop_gyro_integration();
+          angle = 0;
+          state = ORIENT_UP;
+          char buf[16];
+          snprintf(buf, 16, "%f\n", angle);
+          display_write(buf, DISPLAY_LINE_1);
+        }
+        else  
+        {
+            kobukiDriveDirect(leftSpeed, rightSpeed);
+            angle = lsm9ds1_read_gyro_integration().z_axis;
+
+            if (mintilt > tilt) mintilt = tilt;
+        }
+        
+        
+        break; // each case needs to end with break!
+      }
+
+      case ORIENT_UP: {
+        char buf[16];
+        snprintf(buf, 16, "Orient Up %f", mintilt);
+        display_write(buf, DISPLAY_LINE_0);
+        if(is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if (driveUp && (tilt <= (mintilt+2))){
+          state = DRIVING;
+          leftSpeed = 120;
+          rightSpeed = 120;
+        } else {
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+        }
+        break;
+      }
+      case DRIVING: {
+        char buf[16];
+        snprintf(buf, 16, "Driving");
+        display_write(buf, DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        //} else if (fabs(tilt) > 1 && check_cliff(&sensors, &cliff_is_right)) { 
+        } else if (check_cliff(&sensors, &cliff_is_right)) { 
+          distance = 0;
+          leftSpeed = 0;
+          rightSpeed = 0;
+          previous_encoder = sensors.leftWheelEncoder;
+          state = AVOID;
+        } else if (driveUp && fabs(tilt) < 0.5) {
+          distance = 0;
+          leftSpeed = 100;
+          rightSpeed = 100;
+          previous_encoder = sensors.leftWheelEncoder;
+          state = TRANSIENT;
+        }
+        else {
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+          
+          state = DRIVING;
+        }
+        break; // each case needs to end with break!
+      }
+      case TRANSIENT: {
+        char buf[16];
+        snprintf(buf, 16, "Transient");
+        display_write(buf, DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if (check_cliff(&sensors, &cliff_is_right)) { 
+          distance = 0;
+          leftSpeed = 0;
+          rightSpeed = 0;
+          previous_encoder = sensors.leftWheelEncoder;
+          state = AVOID;
+        } else if (distance > 0.1) {
+          lsm9ds1_start_gyro_integration();
+          angle = 0;
+          leftSpeed = 100;
+          rightSpeed = -100;
+          state = ORIENT_DOWN;
+        }
+        else {
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+          distance = measure_distance(sensors.leftWheelEncoder, previous_encoder, true);
+          state = TRANSIENT;
+        }
+        break; // each case needs to end with break!
+      }
+      case ORIENT_DOWN: {
+        char buf[16];
+        snprintf(buf, 16, "Orient Down");
+        display_write(buf, DISPLAY_LINE_0);
+        if(is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if (fabs(angle) > 165) {
+          state = DRIVING;
+          leftSpeed = 100;
+          rightSpeed = 100;
+          lsm9ds1_stop_gyro_integration();
+        } else {
+          driveUp = false;
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+          angle = lsm9ds1_read_gyro_integration().z_axis;
+          char buf[16];
+          snprintf(buf, 16, "%f\n", angle);
+          display_write(buf, DISPLAY_LINE_1);
+          state = ORIENT_DOWN;
+
+        }
+        break;
+      }
+      case BACK: {
+        char buf[16];
+        snprintf(buf, 16, "Back");
+        display_write(buf, DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if(fabs(distance) >= 0.1) {
+          lsm9ds1_start_gyro_integration();
+          angle = 0;
+          state = TURN; 
+        } else {
+          kobukiDriveDirect(leftSpeed, rightSpeed);
+          distance = measure_distance(sensors.leftWheelEncoder, previous_encoder, false);
+        }
+        break;
+      }
+      case TURN: {
+        char buf[16];
+        snprintf(buf, 16, "Turn");
+        display_write(buf, DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+          lsm9ds1_stop_gyro_integration();
+        } else if (fabs(angle) >= 15) {          
+          distance = 0;
+          angle = 0;
+          
+          leftSpeed = 90;
+          rightSpeed = 90;
+          state = DRIVING;
+          lsm9ds1_stop_gyro_integration();
+        }
+        else {
+          // display_write("TURN", DISPLAY_LINE_0);
+          if(!cliff_is_right) kobukiDriveDirect(50, -50);
+          else kobukiDriveDirect(-50, 50);
+          angle = lsm9ds1_read_gyro_integration().z_axis;
+          char buf[16];
+          snprintf(buf, 16, "%f\n", angle);
+          display_write(buf, DISPLAY_LINE_1);
+          state = TURN;
+        }
+        break;
+      }
+      case AVOID: {
+        char buf[16];
+        snprintf(buf, 16, "Avoid");
+        display_write(buf, DISPLAY_LINE_0);
+        kobukiDriveDirect(leftSpeed, rightSpeed);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if(sensors.leftWheelEncoder > previous_encoder) {
+          previous_encoder = sensors.leftWheelEncoder;
+          state = AVOID;
+        } else {
+          leftSpeed = -80;
+          rightSpeed = -80;
+          state = BACK;
+        } 
+        break;
+      }
+
+    }
+    return state;
+}
